@@ -21,6 +21,7 @@ from network_model.model_tf_async import ModelRunnerTFAsync, load_global_vars
 from network_model.model_tf_ddpg import ModelRunnerTFDdpg
 from network_model.model_tf import Model, ModelRunnerTF
 from env.arguments import get_args, get_env
+import tensorflow as tf
 
 class Trainer:
     def __init__(self, args, play_file=None, thread_no=0, global_list=None):
@@ -344,7 +345,7 @@ class Trainer:
         self.reset_game()
         
         episode_reward = 0
-        for step_no in range(self.args.test_step):
+        for step_no in range(50000):
             action_index, greedy_epsilon = self.get_action_index('TEST')                
             reward, state, terminal, game_over = self.do_actions(action_index, 'TEST')
                 
@@ -397,7 +398,7 @@ class Trainer:
         if self.thread_no == 0:
             print 'Start training'
         start_time = time.time()
-        for epoch in range(self.epoch_done + 1, self.args.max_epoch + 1):
+        for epoch in range(self.epoch_done + 1, 1 + 1):
             epoch_total_reward = 0
             episode_total_reward = 0
             epoch_start_time = time.time()
@@ -405,7 +406,7 @@ class Trainer:
             self.reset_game()
             episode = 1
 
-            for step_no in range(1, self.args.epoch_step + 1):
+            for step_no in range(1, 300000 + 1):
                 action_index, greedy_epsilon = self.get_action_index('TRAIN')
                 reward, state, terminal, game_over = self.do_actions(action_index, 'TRAIN')
 
@@ -423,7 +424,7 @@ class Trainer:
                     else:
                         learning_rate = self.args.learning_rate
                                         
-                    self.model_runner.train(minibatch, self.replay_memory, learning_rate, debug_print)
+                    self.model_runner.train(minibatch, self.replay_memory, learning_rate, debug_print, step_no)
                 
                 if self.total_step % self.args.save_step == 0 and self.thread_no == 0:
                     file_name = 'dqn_%s' % self.total_step
@@ -436,12 +437,23 @@ class Trainer:
                         print_step = 500
                         
                     if episode % print_step == 0:
+                        
                         print "Ep %s, score: %.2f, step: %s, elapsed: %.1fs, avg: %.2f t_step:%s, t_elapsed: %.0fm" % (
                                                                                 episode, episode_total_reward,
                                                                                 step_no, (time.time() - episode_start_time),
                                                                                 float(epoch_total_reward) / episode,
                                                                                 self.total_step,
                                                                                 (time.time() - start_time) / 60)
+                        f_d = {self.model_runner.ep_score_placeholder : float(episode_total_reward),
+                        self.model_runner.loss_placeholder : self.model_runner.loss_value,
+
+                        self.model_runner.min_critic_grad_placeholder : np.min(self.model_runner.critic_grads_value),
+                        self.model_runner.max_critic_grad_placeholder : np.max(self.model_runner.critic_grads_value),
+                        self.model_runner.l_r_placeholder : learning_rate
+                         }
+                        summary = self.model_runner.sess.run(self.model_runner.merged, feed_dict=f_d)
+                        self.model_runner.file_writer.add_summary(summary, self.total_step)
+
                     episode_start_time = time.time()
                     
                     episode += 1
@@ -461,7 +473,7 @@ class Trainer:
                   (epoch, float(epoch_total_reward) / episode, 
                    (time.time() - epoch_start_time) / 60,
                    greedy_epsilon, self.total_step, (time.time() - start_time) / 60)
-             
+            """ 
             # Test once every epoch
             if args.run_test == True:
                 if args.asynchronousRL == False:
@@ -470,7 +482,7 @@ class Trainer:
                     if self.thread_no == self.next_test_thread_no:
                         self.test(epoch)
                     self.next_test_thread_no = (self.next_test_thread_no + 1) % self.args.thread_no
-                    
+            """     
             self.epoch_done = epoch
                         
         if self.thread_no == 0:
@@ -736,7 +748,7 @@ class DebugInput(threading.Thread):
     def finish(self):
         self.running = False
     
-debug_print = False
+debug_print = True
 debug_print_step = False
 debug_pause = False
 debug_display = False
@@ -747,6 +759,7 @@ global_step_no = 0
 if __name__ == '__main__':
     args = get_args()
     save_file = args.snapshot
+    tf.set_random_seed(1)
 
     if args.asynchronousRL:
         threadList = []
